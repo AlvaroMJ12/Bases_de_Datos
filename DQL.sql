@@ -49,3 +49,5 @@ JOIN paises p on a.id_pais = p.id_pais
 JOIN resultados r on a.id_atleta = r.id_atleta
 GROUP BY p.nombre
 ORDER BY oros DESC, platas DESC, bronces DESC
+
+
