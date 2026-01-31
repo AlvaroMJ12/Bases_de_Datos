@@ -85,3 +85,147 @@ join resultados r on r.id_atleta = a.id_atleta
 where r.medalla is not null
 group by p.nombre
 order by oros desc;
+
+-- DML
+
+/* 10. Queremos actualizar los nombres de los países a mayúsculas, para aquellos países que han
+ganado medallas en más de 5 deportes diferentes. (RA3 0.75 puntos , RA4 2 puntos)
+*/
+-- Usamos el IN para decir que los nombres que esstén ahi dentro se pongan en mayúsculas
+
+update paises set nombre = upper(nombre) where nombre in (	
+	SELECT p.nombre
+		from atletas a
+		join paises p on p.id_pais = a.id_pais 
+		join resultados r on r.id_atleta = a.id_atleta
+		join deportes d on d.id_deporte = r.id_deporte
+		where r.medalla is not null
+		group by p.id_pais
+		having count(distinct(d.id_deporte)) > 5
+);
+
+
+/*
+11. Queremos cambiar el país de los atletas que han ganado un mínimo de dos medallas a un
+país ficticio "Olímpicos" con id_pais y código de país con valor 999, y continente "Olimpia",
+simulando así una nacionalidad honorífica. Todo en un solo comando. (RA3 0.75 RA4 2
+puntos)
+*/
+WITH crear_nacionalidad AS (
+    -- PARTE 1: Definimos el país ficticio si no existe
+    INSERT INTO paises (id_pais, nombre, codigo_pais, continente)
+    VALUES (999, 'Olímpicos', '999', 'Olimpia')
+    ON CONFLICT (id_pais) DO NOTHING -- Seguridad: si ya existe, no da error
+)
+-- PARTE 2: El comando principal (el UPDATE)
+UPDATE atletas
+SET id_pais = 999
+WHERE id_atleta IN (
+    -- Filtramos: solo los que tienen un mínimo de 2 medallas
+    SELECT id_atleta
+    FROM resultados
+    GROUP BY id_atleta
+    HAVING COUNT(id_resultado) >= 2
+);
+
+/*
+12. Queremos cambiar las medallas de plata a oro para deportistas que tenían menos de 30
+años en el momento de ganarlas, como un incentivo a la juventud. (RA4 2 puntos)
+*/
+
+UPDATE resultados 
+SET medalla = 'oro' 
+WHERE id_resultado IN ( -- Filtramos la fila exacta, no al atleta completo
+    SELECT r.id_resultado
+    FROM resultados r
+    JOIN atletas a ON a.id_atleta = r.id_atleta
+    WHERE r.medalla = 'plata' 
+    AND (EXTRACT(YEAR FROM r.fecha_evento) - EXTRACT(YEAR FROM a.fecha_nacimiento)) < 30
+);
+
+/*
+13. Queremos añadir el sufijo " - Doble" al apellido de los atletas que han ganado más de una
+medalla (RA4 2 puntos)
+*/
+
+UPDATE atletas SET apellido = apellido || ' - Doble' where id_atleta  in (
+	SELECT a.id_atleta
+	from atletas a
+	join resultados r on r.id_atleta = a.id_atleta
+	group by a.id_atleta
+	having count(r.medalla) > 1
+)	
+
+/*
+14. Actualizar el nombre del país añadiendo tantos * al nombre como medallas de oro ha
+obtenido. (RA4 2 puntos).
+*/
+UPDATE paises p set  nombre = nombre || REPEAT('*', (
+	SELECT count(r.medalla)
+	from atletas a
+	join resultados r on r.id_atleta = a.id_atleta
+	where r.medalla = 'oro' and p.id_pais = a.id_pais
+)) where id_pais in(
+	select p.id_pais
+	from atletas a
+	join paises p on p.id_pais = a.id_pais 
+	join resultados r on r.id_atleta = a.id_atleta
+	where r.medalla = 'oro'
+	group by p.id_pais
+);
+
+/*
+15. Crear una función llamada contar_medallas_pais, que reciba el nombre de un país y
+devuelva el número total de medallas (oro, plata, bronce) que ha ganado. Si el país no
+existe o no tiene medallas, debe devolver 0. (RA5 1.25 puntos)
+*/
+CREATE OR REPLACE FUNCTION contar_medallas_pais(p_nombre_pais text)
+returns integer as $$
+declare
+	v_total_medallas integer:= 0;
+begin
+			select count(r.medalla)
+			into v_total_medallas
+			from atletas a
+			join paises p on p.id_pais = a.id_pais 
+			join resultados r on r.id_atleta = a.id_atleta
+			where p.nombre = p_p_nombre_pais;
+
+			RETURN v_total_medallas;
+end;
+$$ language plpgsql;
+
+
+/*
+16. Crear un procedimiento llamado registrar_medalla, que registre una nueva medalla en la
+tabla resultados, recibiendo id_atleta, id_deporte, medalla y fecha_evento. Debe verificar
+que el atleta, deporte existan antes de insertar. Además, el tipo de medalla debe ser oro o
+plata o bronce, si al insertar no se cumple algo de lo antes dicho de debe generar una
+excepción. Los mensajes serían Atleta xx no existe, Deporte xx no existe y Medalla xx no
+válida. (RA5 1.25 puntos)
+*/
+begin;
+CREATE OR REPLACE PROCEDURE registrar_medalla(p_id_atleta INTEGER, p_id_deporte INTEGER, p_medalla TEXT, p_fecha_evento DATE)
+AS $$
+DECLARE
+BEGIN
+	IF NOT EXISTS(
+		select id_atleta
+		from atletas 
+		where id_atleta=p_id_atleta
+		) THEN RAISE EXCEPTION 'Atleta % no existe', p_id_atleta;
+	ELSIF NOT EXISTS(
+		select id_deporte 
+		from deportes 
+		where id_deporte=p_id_deporte
+		) THEN RAISE EXCEPTION 'Deporte % no existe', p_id_deporte;
+	ELSIF p_medalla NOT IN('oro', 'plata', 'bronce') 
+		THEN RAISE EXCEPTION 'Medalla % no válida', p_medalla;
+	ELSE 
+		INSERT INTO resultados(id_atleta, id_deporte, medalla, fecha_evento)
+		VALUES (p_id_atleta, p_id_deporte, p_medalla, p_fecha_evento /*NO SE SI PONER CURRENT_DATE O LA FECHA QUE HE PUESTO*/);
+	END IF;
+END;
+$$ LANGUAGE plpgsql;
+
+rollback;
