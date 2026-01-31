@@ -229,3 +229,59 @@ END;
 $$ LANGUAGE plpgsql;
 
 rollback;
+
+
+/*
+17.  Crear un procedimiento llamado reasignar_pais, que reasigne todos los atletas de un país 
+origen a un país destino, actualizando id_pais en atletas. Debe verificar que ambos países 
+existan y registrar el cambio en una tabla de auditoría. Debes crear una tabla auditoria país 
+con este comando:  
+CREATE TABLE auditoria_pais ( 
+    id_auditoria SERIAL PRIMARY KEY, 
+    id_atleta INTEGER, 
+    pais_origen INTEGER, 
+    pais_destino INTEGER, 
+    fecha_cambio TIMESTAMP DEFAULT CURRENT_TIMESTAMP ); 
+Además, debe generar excepciones País origen xx no existe o País destino xx no existe 
+según  corresponda.  Te  recuerdo  de  usar  un  begin  antes  de  ejecutar  el  procedimiento  y  un 
+rollback al final. (RA5 1.25 puntos)
+*/
+BEGIN;
+
+CREATE OR REPLACE PROCEDURE reasignar_pais(p_pais_origen TEXT, p_pais_destino TEXT)
+AS $$
+DECLARE 
+    v_id_origen INTEGER;
+    v_id_destino INTEGER;
+    v_reg RECORD; -- Variable para recorrer los atletas uno a uno [cite: 198, 609]
+BEGIN
+    -- 1. Buscamos el ID del país origen y validamos su existencia
+	/* Usamos SELECT INTO para guardar los IDs de los países a partir de sus nombres.*/
+    SELECT id_pais INTO v_id_origen FROM paises WHERE nombre = p_pais_origen;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'País origen % no existe', p_pais_origen; -- 
+    END IF;
+
+    -- 2. Buscamos el ID del país destino y validamos
+    SELECT id_pais INTO v_id_destino FROM paises WHERE nombre = p_pais_destino;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'País destino % no existe', p_pais_destino;
+    END IF;
+
+    -- 3. Bucle para procesar a cada atleta del país de origen [cite: 606]
+    FOR v_reg IN (SELECT id_atleta FROM atletas WHERE id_pais = v_id_origen) LOOP
+        
+        -- Actualizamos el atleta actual (RA4)
+        UPDATE atletas SET id_pais = v_id_destino 
+        WHERE id_atleta = v_reg.id_atleta;
+
+        -- Registramos el cambio en la tabla de auditoría
+        INSERT INTO auditoria_pais (id_atleta, pais_origen, pais_destino)
+        VALUES (v_reg.id_atleta, v_id_origen, v_id_destino);
+        
+    END LOOP;
+
+END;
+$$ LANGUAGE plpgsql;
+
+ROLLBACK;
